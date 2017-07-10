@@ -12,9 +12,15 @@ import click
 from jobpoller import JobPoller
 
 cwd = os.getcwd()
-target = join(cwd, 'target', 'artifacts')
+target = join(cwd, 'artifacts')
+default_script_path = join(os.path.dirname(os.path.realpath(__file__)), 'codebuild-builder.py')
 
 class CodebuildEmulator:
+
+    def __init__(self, docker_version):
+        self._docker_client = docker.from_env(version=docker_version)
+        self._docker_api = docker.APIClient(version=docker_version)
+
 
     def _get_project(self):
         codebuild = boto3.client('codebuild')
@@ -50,8 +56,7 @@ class CodebuildEmulator:
         return project['environment']['image']
 
 
-    def run(self, configuration, input_src=cwd, target_dir=target, pid1_path='codebuild-builder.py'):
-
+    def run(self, configuration, input_src=cwd, target_dir=target, pid1_path=default_script_path):
         self._project_name = configuration['ProjectName']
 
         project = self._get_project()
@@ -72,7 +77,7 @@ class CodebuildEmulator:
         bin = join(readonly, 'bin')
         os.mkdir(bin)
 
-        shutil.copy2(pid1_path, join(bin, 'execute'))
+        shutil.copy2(pid1_path, join(bin, 'executor'))
         src = join(readonly, 'src')
 
         shutil.copytree(input_src, src)
@@ -84,7 +89,7 @@ class CodebuildEmulator:
         buildspec = self._get_buildspec(project)
         buildspec_dest = join(readonly, 'buildspec.yml')
 
-        if buildspec.startswith('version: ') :
+        if buildspec.startswith('version: '):
             with open(buildspec_dest, 'w') as buildspecfile:
                 buildspecfile.write(buildspec)
         else:
@@ -94,18 +99,15 @@ class CodebuildEmulator:
             else:
                raise Exception("No buildspec provided")
 
-
         output_dir = join(tempdir, 'codebuild/output')
         os.mkdir(output_dir)
 
         image = self._get_image(project)
 
-        docker_client = docker.from_env(version='auto')
-
-        container = docker_client.containers.run(image=image,
+        container = self._docker_client.containers.run(image=image,
                                                  volumes={readonly: {'bind': '/codebuild/readonly', 'mode': 'ro'},
                                                           output_dir: {'bind': '/codebuild/output', 'mode': 'rw'}},
-                                                 entrypoint='/codebuild/readonly/bin/execute',
+                                                 entrypoint='/codebuild/readonly/bin/executor',
                                                  environment={'AWS_ACCESS_KEY_ID': access_key_id,
                                                               'AWS_SECRET_ACCESS_KEY': secret_access_key,
                                                               'AWS_SESSION_TOKEN': session_token},
@@ -130,10 +132,10 @@ class CodebuildEmulator:
         while not container.status == 'exited':
             time.sleep(1)
 
-        docker_api = docker.APIClient(version='1.24')
-        exit_code = docker_api.inspect_container(container.id)['State']['ExitCode']
+        exit_code = self._docker_api.inspect_container(container.id)['State']['ExitCode']
 
-        shutil.rmtree(target_dir)
+        shutil.rmtree(target_dir, ignore_errors=True)
+
         shutil.copytree(join(output_dir, 'artifacts'), target_dir)
         shutil.rmtree(tempdir)
 
@@ -147,19 +149,21 @@ def main():
 
 
 @click.command()
-@click.option('--provider')
-def server(provider):
-    emulator = CodebuildEmulator()
+@click.option('--provider', required=True)
+@click.option('--docker-version', default='1.24')
+def server(provider, docker_version):
+    emulator = CodebuildEmulator(docker_version)
     poller = JobPoller({'category': 'Build', 'owner': 'Custom', 'provider': provider, 'version': '1'}, emulator)
     poller.poll()
 
 
 @click.command()
-@click.option('--project')
-@click.option('--input-dir')
-@click.option('--target-dir')
-def developer(project, input_dir, target_dir):
-    emulator = CodebuildEmulator()
+@click.option('--project', required=True)
+@click.option('--input-dir', default=cwd)
+@click.option('--target-dir', default=target)
+@click.option('--docker-version', default='1.24')
+def developer(project, input_dir, target_dir, docker_version):
+    emulator = CodebuildEmulator(docker_version)
     emulator.run({'ProjectName': project}, input_src=input_dir, target_dir=target_dir)
 
 

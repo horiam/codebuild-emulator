@@ -19,7 +19,6 @@ class CodebuildBuilder:
 
 
     def _parse_buildspec(self):
-
         buildspec = self._get_buiildspec()
         self._version = buildspec['version']
         self._envs = buildspec['env']['variables'] if 'env' in buildspec else []
@@ -28,7 +27,6 @@ class CodebuildBuilder:
 
 
     def _run_phase(self, phase_name):
-
         if not phase_name in self._phases:
             self._returncodes[phase_name] = 0
             return True
@@ -69,7 +67,6 @@ class CodebuildBuilder:
 
 
     def _upload_artifacts(self):
-
         base_directory = self._artifacts['base-directory'] + '/' if 'base-directory' in self._artifacts else ''
         discard_paths = self._artifacts['discard-paths']
 
@@ -89,7 +86,6 @@ class CodebuildBuilder:
                         shutil.copy2(artifact, artifact_dir)
                     else:
                         subprocess.Popen(['cp','--parents',artifact,artifact_dir], cwd=self._src).wait()
-
 
 
     def _process_buildspec_phase(self, phases, phase_name):
@@ -119,7 +115,7 @@ class CodebuildBuilder:
 
             self._parse_buildspec()
 
-            if  self._run_phase('install') and self._run_phase('pre_build'):
+            if self._run_phase('install') and self._run_phase('pre_build'):
                 self._run_phase('build')
                 self._run_phase('post_build')
 

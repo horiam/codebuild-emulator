@@ -3,6 +3,7 @@
 import boto3
 import shutil
 import zipfile
+from zipfile import ZipFile, ZipInfo
 import os
 import tempfile
 import time
@@ -20,6 +21,7 @@ class JobPoller:
 
     def poll(self):
         jobs = []
+        print("Polling for jobs %s" % self._action_type_id)
         while not jobs:
             time.sleep(2)
             response = self._codepipeline.poll_for_jobs(actionTypeId=self._action_type_id, maxBatchSize=1)
@@ -28,7 +30,8 @@ class JobPoller:
         job = jobs[0]
 
         job_id = job['id']
-        print(job_id)
+        print("Job with id %s found" % job_id)
+
         nonce = job['nonce']
         self._codepipeline.acknowledge_job(jobId=job_id, nonce=nonce)
 
@@ -37,7 +40,6 @@ class JobPoller:
 
 
     def _build(self, job):
-
         job_id = job['id']
 
         try:
@@ -62,12 +64,13 @@ class JobPoller:
            print('Downloading artifact %s from bucket %s' % (objectKey, bucketName))
            s3.download_file(bucketName, objectKey, join(tempdir, 'input.zip'))
 
-           with zipfile.ZipFile(join(tempdir, 'input.zip'), 'r') as zip:
-               zip.extractall(target)
+           with ZipFileWithPermissions(join(tempdir, 'input.zip'), 'r') as zip:
+               zip.extractall(input_src)
 
            configuration = job['data']['actionConfiguration']['configuration']
            print('Using configuration %s' % configuration)
 
+           print("Building job %s" % job_id)
            #Run build
            rc = self._builder.run(configuration=configuration, input_src=input_src, target_dir=target)
 
@@ -91,4 +94,19 @@ class JobPoller:
 
         except:
            self._codepipeline.put_job_failure_result(jobId=job_id, failureDetails={'type': 'JobFailed', 'message': 'Failed'})
+           raise
 
+
+# ZipFile should keep permissions
+class ZipFileWithPermissions(ZipFile):
+    def extract(self, member, path=None, pwd=None):
+        if not isinstance(member, ZipInfo):
+            member = self.getinfo(member)
+
+        if path is None:
+            path = os.getcwd()
+
+        ret_val = self._extract_member(member, path, pwd)
+        attr = member.external_attr >> 16
+        os.chmod(ret_val, attr)
+        return ret_val

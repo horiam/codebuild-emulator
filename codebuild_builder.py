@@ -17,14 +17,12 @@ class CodebuildBuilder:
        self._returncodes = {}
        self._succeeded = True
 
-
     def _parse_buildspec(self):
         buildspec = self._get_buiildspec()
         self._version = buildspec['version']
         self._envs = buildspec['env']['variables'] if 'env' in buildspec else []
         self._phases = buildspec['phases']
         self._artifacts = buildspec['artifacts']
-
 
     def _run_phase(self, phase_name):
         if not phase_name in self._phases:
@@ -65,7 +63,6 @@ class CodebuildBuilder:
         self._returncodes[phase_name] = rc
         return rc == 0
 
-
     def _upload_artifacts(self):
         base_directory = self._artifacts['base-directory'] + '/' if 'base-directory' in self._artifacts else ''
         discard_paths = self._artifacts['discard-paths']
@@ -87,13 +84,11 @@ class CodebuildBuilder:
                     else:
                         subprocess.Popen(['cp','--parents',artifact,artifact_dir], cwd=self._src).wait()
 
-
     def _process_buildspec_phase(self, phases, phase_name):
         if phase_name in phases:
             commands = phases[phase_name]['commands']
             return commands
         return []
-
 
     def _get_buiildspec(self):
         buildspec_path = join(self._input_dir, 'buildspec.yml')
@@ -101,31 +96,36 @@ class CodebuildBuilder:
             buildspec = yaml.load(stream)
             return buildspec
 
+    def _prepare_output(self):
+        self._src = join(self._output_dir, 'src123456789')
+        shutil.copytree(join(self._input_dir, 'src'),
+                        self._src)
+        tmp = join(self._output_dir, 'tmp')
+        os.mkdir(tmp)
+
+        with open(join(tmp, 'pwd.txt'), 'w') as pwdfile:
+            pwdfile.write(self._src)
+
+    def _run_phases(self):
+        if self._run_phase('install') and self._run_phase('pre_build'):
+            self._run_phase('build')
+            self._run_phase('post_build')
+            return True
+        else:
+            return False
 
     def run(self):
-        try :
-            self._src = join(self._output_dir, 'src123456789')
-            shutil.copytree(join(self._input_dir, 'src'),
-                            self._src)
-            tmp = join(self._output_dir, 'tmp')
-            os.mkdir(tmp)
-
-            with open(join(tmp, 'pwd.txt'), 'w') as pwdfile:
-                pwdfile.write(self._src)
-
+        try:
+            self._prepare_output()
             self._parse_buildspec()
 
-            if self._run_phase('install') and self._run_phase('pre_build'):
-                self._run_phase('build')
-                self._run_phase('post_build')
-
+            if self._run_phases():
                 self._upload_artifacts()
 
             if not self._succeeded:
-                raise Exception("Build failed")
-
+                raise Exception('Build failed')
         except:
-           raise
+            raise
 
 
 if __name__ == '__main__':

@@ -13,7 +13,7 @@ from jobpoller import JobPoller
 
 cwd = os.getcwd()
 target = join(cwd, 'artifacts')
-default_script_path = join(os.path.dirname(os.path.realpath(__file__)), 'codebuild-builder.py')
+default_script_path = join(os.path.dirname(os.path.realpath(__file__)), 'codebuild_builder.py')
 
 class CodebuildEmulator:
 

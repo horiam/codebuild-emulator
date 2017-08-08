@@ -1,8 +1,8 @@
 version: 0.2
 env:
   variables:
-    install: "install"
-    build: "build"
+    install: install
+    build: build
 phases:
   install:
     commands:

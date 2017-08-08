@@ -9,6 +9,7 @@ import time
 import boto3
 import docker
 import click
+import time
 from jobpoller import JobPoller
 
 cwd = os.getcwd()
@@ -19,10 +20,13 @@ class CodebuildEmulator:
 
     def __init__(self, docker_version,
                  codebuild_client=boto3.client('codebuild'),
-                 sts_client=boto3.client('sts')):
+                 sts_client=boto3.client('sts'),
+                 assume_role=True, debug=False):
         self._docker_version = docker_version
         self._codebuild_client = codebuild_client
         self._sts_client = sts_client
+        self._assume_role = assume_role
+        self._debug = debug
 
     def _get_project(self, project_name):
         response = self._codebuild_client.batch_get_projects(names=[project_name])
@@ -37,11 +41,14 @@ class CodebuildEmulator:
         work_dir = tempfile.mkdtemp()
 
         run = CodebuildRun(project, input_src, work_dir,
-                           self._sts_client, self._docker_version)
+                           self._sts_client, self._docker_version,
+                           assume_role=self._assume_role,
+                           debug=self._debug)
         run.assume_role()
         run.prepare_dirs()
 
-        exit_code = run.run_container()
+        run.run_container()
+        exit_code = run.wait_for_container()
 
         run.copy_artifacts(target_dir)
         shutil.rmtree(work_dir)
@@ -50,20 +57,29 @@ class CodebuildEmulator:
 
 class CodebuildRun:
     def __init__(self, project, input_src, work_dir,
-                 sts_client=boto3.client('sts'), docker_version='1.24'):
+                 sts_client=boto3.client('sts'), docker_version='1.24',
+                 assume_role=True, debug=False):
         self._project = project
         self._input_src = input_src
         self._work_dir = work_dir
         self._sts_client = sts_client
         self._docker_version = docker_version
+        self._assume_role = assume_role
+        self._debug = debug
 
     def assume_role(self):
-        service_role = self._project['serviceRole']
-        assume = self._sts_client.assume_role(RoleArn=service_role,
-                                              RoleSessionName='codebuild-emulator')
-        self._access_key_id = assume['Credentials']['AccessKeyId']
-        self._secret_access_key = assume['Credentials']['SecretAccessKey']
-        self._session_token = assume['Credentials']['SessionToken']
+        if self._assume_role:
+            service_role = self._project['serviceRole']
+            assume = self._sts_client.assume_role(RoleArn=service_role,
+                                                  RoleSessionName='codebuild-emulator')
+            self._access_key_id = assume['Credentials']['AccessKeyId']
+            self._secret_access_key = assume['Credentials']['SecretAccessKey']
+            self._session_token = assume['Credentials']['SessionToken']
+        else:
+            creds = boto3.Session.get_credentials()
+            self._access_key_id = creds.access_key
+            self._secret_access_key = creds.secret_key
+            self._session_token = creds.token
 
     def prepare_dirs(self):
         readonly = join(self._work_dir, 'codebuild', 'readonly')
@@ -99,6 +115,11 @@ class CodebuildRun:
         os.mkdir(output_dir)
         self._output_dir = output_dir
 
+        self._debug_file = join(output_dir, 'debug')
+        if self._debug:
+            open(self._debug_file, 'a').close()
+
+
     def run_container(self):
         image = self._project['environment']['image']
         volumes = {self._readonly_dir: {'bind': '/codebuild/readonly', 'mode': 'ro'},
@@ -109,7 +130,6 @@ class CodebuildRun:
                        'AWS_SESSION_TOKEN': self._session_token}
 
         docker_client = docker.from_env(version=self._docker_version)
-        docker_api = docker.APIClient(version=self._docker_version)
         container = docker_client.containers.run(image=image,
                                                        volumes=volumes,
                                                        entrypoint=entrypoint,
@@ -117,22 +137,28 @@ class CodebuildRun:
                                                        user=os.getuid(),
                                                        tty=True,
                                                        detach=True)
-        stream = container.logs(stream=True)
+        self._container = container
+
+    def wait_for_container(self):
+        stream = self._container.logs(stream=True)
         str = ''
 
         for c in stream:
             if c == '\n':
                 print(str)
                 str = ''
+                if self._debug:
+                    self._wait_for_input()
             else:
                 str = str + c
 
-        container.reload()
+        self._container.reload()
 
-        while not container.status == 'exited':
+        while not self._container.status == 'exited':
             time.sleep(1)
 
-        exit_code = docker_api.inspect_container(container.id)['State']['ExitCode']
+        docker_api = docker.APIClient(version=self._docker_version)
+        exit_code = docker_api.inspect_container(self._container.id)['State']['ExitCode']
         return exit_code
 
     def copy_artifacts(self, artifacts_target_dir):
@@ -158,6 +184,17 @@ class CodebuildRun:
         environment['CODEBUILD_BUILD_ID'] = 'XXXX'
         return environment
 
+    def _wait_for_input(self):
+        while not os.path.exists(self._debug_file):
+            time.sleep(1)
+        value = click.prompt('Run this command ? [Y/S/X] ', default='Y')
+
+        if value == 'S':
+            open(join(self._output_dir, 'skip'), 'a').close()
+        elif value == 'X':
+            open(join(self._output_dir, 'exit'), 'a').close()
+        os.unlink(self._debug_file)
+
 
 @click.group()
 def main():
@@ -166,8 +203,10 @@ def main():
 @click.command()
 @click.option('--provider', required=True)
 @click.option('--docker-version', default='1.24')
-def server(provider, docker_version):
-    emulator = CodebuildEmulator(docker_version=docker_version)
+@click.option('--no-assume', is_flag=True)
+@click.option('--debug', is_flag=True)
+def server(provider, docker_version, no_assume, debug):
+    emulator = CodebuildEmulator(docker_version=docker_version, assume_role=not no_assume, debug=debug)
     poller = JobPoller({'category': 'Build', 'owner': 'Custom', 'provider': provider, 'version': '1'}, emulator)
     poller.poll()
 
@@ -176,8 +215,10 @@ def server(provider, docker_version):
 @click.option('--input-dir', default=cwd)
 @click.option('--target-dir', default=target)
 @click.option('--docker-version', default='1.24')
-def developer(project, input_dir, target_dir, docker_version):
-    emulator = CodebuildEmulator(docker_version=docker_version)
+@click.option('--no-assume', is_flag=True)
+@click.option('--debug', is_flag=True)
+def developer(project, input_dir, target_dir, docker_version, no_assume, debug):
+    emulator = CodebuildEmulator(docker_version=docker_version, assume_role=not no_assume, debug=debug)
     emulator.run({'ProjectName': project}, input_src=input_dir, target_dir=target_dir)
 
 

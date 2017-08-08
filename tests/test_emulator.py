@@ -64,7 +64,8 @@ class TestEmulator(unittest.TestCase):
         run = CodebuildRun(test_project, input_src, work_dir, Boto3Mock(assume_role_response))
         run.assume_role()
         run.prepare_dirs()
-        exit_code = run.run_container()
+        run.run_container()
+        exit_code = run.wait_for_container()
         self.assertEquals(exit_code, 0)
         #the rest is tested in test_builder
 

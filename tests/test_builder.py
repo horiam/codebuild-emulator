@@ -3,6 +3,8 @@ import shutil
 import os
 from codebuild_builder import CodebuildBuilder
 from os.path import join
+import threading
+import time
 
 class TestBuilder(unittest.TestCase):
 
@@ -103,7 +105,7 @@ class TestBuilder(unittest.TestCase):
         self.assertTrue(builder._succeeded)
 
     def test_failing_run(self):
-        print 'test_successful_run'
+        print 'test_failing_run'
         output_dir, readonly_dir = self._prepare_test('bad')
         builder = CodebuildBuilder(input_dir=readonly_dir,
                                    output_dir=output_dir,
@@ -125,6 +127,47 @@ class TestBuilder(unittest.TestCase):
             print expected_file_path
             self.assertTrue(os.path.exists(expected_file_path))
 
+    def test_debug_run(self):
+        print 'test_debug_run'
+        output_dir, readonly_dir = self._prepare_test()
+        open(join(output_dir, 'debug'), 'a').close()
+        builder = CodebuildBuilder(input_dir=readonly_dir,
+                                   output_dir=output_dir,
+                                   debug=False)
+
+        run_thread = threading.Thread(target=builder.run)
+        run_thread.start()
+        time.sleep(1)
+
+        # continue 'ls' command in install phase
+        os.unlink(join(output_dir, 'debug'))
+        time.sleep(1)
+        # skip 'touch' command in install phase
+        open(join(output_dir, 'skip'), 'a').close()
+        os.unlink(join(output_dir, 'debug'))
+        time.sleep(1)
+        # skip 'ls' command in pre_build phase
+        open(join(output_dir, 'skip'), 'a').close()
+        os.unlink(join(output_dir, 'debug'))
+        time.sleep(1)
+        # continue 'touch' command in install phase
+        os.unlink(join(output_dir, 'debug'))
+        time.sleep(1)
+        # stop run
+        open(join(output_dir, 'exit'), 'a').close()
+        os.unlink(join(output_dir, 'debug'))
+
+        run_thread.join(timeout=10)
+        self.assertTrue(not run_thread.is_alive())
+
+        artifacts_dir = join(output_dir, 'src123456789')
+        # needs to upload the files because build failed
+        for expected_file_name in ['source.foo', 'pre_build']:
+            expected_file_path = join(artifacts_dir, expected_file_name)
+            print expected_file_path
+            self.assertTrue(os.path.exists(expected_file_path))
+
+        self.assertEquals(len(os.listdir(artifacts_dir)), 2)
 
 if __name__ == '__main__':
     unittest.main()

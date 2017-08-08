@@ -7,13 +7,14 @@ import subprocess
 import yaml
 import glob
 import json
+import time
 
 class CodebuildBuilder:
 
     def __init__(self, input_dir, output_dir, debug):
        self._input_dir = input_dir
        self._output_dir = output_dir
-       self._debug = debug
+       self._debug = debug or os.path.exists(join(output_dir, 'debug'))
        self._returncodes = {}
        self._succeeded = True
 
@@ -55,10 +56,18 @@ class CodebuildBuilder:
                 shellfile.write("export -p > %s\n" % envsh)
                 shellfile.write("pwd > %s\n" % pwd)
             os.chmod(shell, 500)
+            # debug mode
+            if self._debug:
+                skip = self._wait_for_debug()
+                if skip:
+                   continue
+
             rc = subprocess.call(shell, shell=True)
+
             if not rc == 0:
                 self._succeeded = False
-                break
+                if not self._debug:
+                    break
 
         self._returncodes[phase_name] = rc
         return rc == 0
@@ -127,6 +136,21 @@ class CodebuildBuilder:
         except:
             raise
 
+    def _wait_for_debug(self):
+        skip = False
+        debug_flag = join(self._output_dir, 'debug')
+        while os.path.exists(debug_flag):
+            time.sleep(1)
+
+        skip_flag = join(self._output_dir, 'skip')
+        if os.path.exists(skip_flag):
+            skip = True
+            os.unlink(skip_flag)
+        elif os.path.exists(join(self._output_dir, 'exit')):
+            exit()
+
+        open(debug_flag, 'a').close()
+        return skip
 
 if __name__ == '__main__':
     builder = CodebuildBuilder(input_dir='/codebuild/readonly',

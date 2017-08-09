@@ -58,6 +58,8 @@ class CodebuildBuilder:
             os.chmod(shell, 500)
             # debug mode
             if self._debug:
+                print(command)
+                print('Do you want to run this command ? [Enter/S/X] ')
                 skip = self._wait_for_debug()
                 if skip:
                    continue

@@ -10,6 +10,7 @@ import boto3
 import docker
 import click
 import time
+import threading
 from jobpoller import JobPoller
 
 cwd = os.getcwd()
@@ -76,7 +77,7 @@ class CodebuildRun:
             self._secret_access_key = assume['Credentials']['SecretAccessKey']
             self._session_token = assume['Credentials']['SessionToken']
         else:
-            creds = boto3.Session.get_credentials()
+            creds = boto3.Session().get_credentials()
             self._access_key_id = creds.access_key
             self._secret_access_key = creds.secret_key
             self._session_token = creds.token
@@ -130,6 +131,8 @@ class CodebuildRun:
                        'AWS_SESSION_TOKEN': self._session_token}
 
         docker_client = docker.from_env(version=self._docker_version)
+        print('Pulling %s' % image)
+        docker_client.images.pull(name=image)
         container = docker_client.containers.run(image=image,
                                                        volumes=volumes,
                                                        entrypoint=entrypoint,
@@ -140,17 +143,22 @@ class CodebuildRun:
         self._container = container
 
     def wait_for_container(self):
+        if self._debug:
+            run_thread = threading.Thread(target=self._wait_for_input)
+            run_thread.daemon = True
+            run_thread.start()
+
         stream = self._container.logs(stream=True)
         str = ''
-
         for c in stream:
             if c == '\n':
                 print(str)
                 str = ''
-                if self._debug:
-                    self._wait_for_input()
             else:
                 str = str + c
+
+        if self._debug:
+            run_thread.join(timeout=10)
 
         self._container.reload()
 
@@ -185,15 +193,19 @@ class CodebuildRun:
         return environment
 
     def _wait_for_input(self):
-        while not os.path.exists(self._debug_file):
+        while True:
+            while not os.path.exists(self._debug_file):
+                time.sleep(1)
             time.sleep(1)
-        value = click.prompt('Run this command ? [Y/S/X] ', default='Y')
+            value = raw_input('')
 
-        if value == 'S':
-            open(join(self._output_dir, 'skip'), 'a').close()
-        elif value == 'X':
-            open(join(self._output_dir, 'exit'), 'a').close()
-        os.unlink(self._debug_file)
+            if value == 'S':
+                open(join(self._output_dir, 'skip'), 'a').close()
+            elif value == 'Q':
+                open(join(self._output_dir, 'exit'), 'a').close()
+                os.unlink(self._debug_file)
+                break
+            os.unlink(self._debug_file)
 
 
 @click.group()

@@ -130,6 +130,10 @@ class CodebuildRun:
                        'AWS_SECRET_ACCESS_KEY': self._secret_access_key,
                        'AWS_SESSION_TOKEN': self._session_token}
 
+        privileged_mode = self._project['environment']['privilegedMode']
+        if privileged_mode:
+            volumes['/var/run/docker.sock'] = {'bind': '/var/run/docker.sock', 'mode': 'rw'}
+
         docker_client = docker.from_env(version=self._docker_version)
         print('Pulling %s' % image)
         docker_client.images.pull(name=image)
@@ -138,6 +142,7 @@ class CodebuildRun:
                                                        entrypoint=entrypoint,
                                                        environment=environment,
                                                        user=os.getuid(),
+                                                       privileged=privileged_mode,
                                                        tty=True,
                                                        detach=True)
         self._container = container

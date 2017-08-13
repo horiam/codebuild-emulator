@@ -84,6 +84,20 @@ class TestEmulator(unittest.TestCase):
         self.assertTrue(os.path.exists(join(artifacts_dir, 'pre_build')))
         self.assertTrue(os.path.exists(join(artifacts_dir, 'post_build')))
 
+    # requires docker image codebuild-emulator-dind-test built from https://github.com/aws/aws-codebuild-docker-images/tree/master/ubuntu/docker/1.12.1
+    def test_run_dind_container(self):
+        print 'test_run_dind_container'
+        input_src, work_dir, artifacts_dir = self._prepare_test()
+        with open(join(this_dir, 'data', 'batch-get-projects-4-dind.out'), 'r') as batchgetprojectsdind:
+            batch_get_projects_response_dind = json.load(batchgetprojectsdind)
+        test_dind_project = batch_get_projects_response_dind['projects'][0]
+        run = CodebuildRun(test_dind_project, input_src, work_dir, Boto3Mock(assume_role_response))
+        run.assume_role()
+        run.prepare_dirs()
+        run.run_container()
+        exit_code = run.wait_for_container()
+        self.assertEquals(exit_code, 0)
+
 
 class Boto3Mock:
     def __init__(self, what_to_return):

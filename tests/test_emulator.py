@@ -55,7 +55,7 @@ class TestEmulator(unittest.TestCase):
         self.assertEqual(first_line, 'version: 0.2\n')
         with open(join(work_dir, 'codebuild', 'readonly', 'variables.json'), 'r') as variables_file:
             variables = json.load(variables_file)
-        self.assertDictEqual(variables, {"TEST_ENV_VAR_1": "foo", "CODEBUILD_BUILD_ID": "XXXX", "TEST_ENV_VAR_2": "bar"})
+        self.assertDictEqual(variables, {"TEST_ENV_VAR_1": "foo", "TEST_ENV_VAR_2": "bar"})
 
     # requires docker image codebuild-emulator-test built from the provided Dockerfile
     def test_run_container(self):
@@ -74,7 +74,9 @@ class TestEmulator(unittest.TestCase):
         input_src, work_dir, artifacts_dir = self._prepare_test()
         emulator = CodebuildEmulator('1.24',
                                      codebuild_client=Boto3Mock(batch_get_projects_response),
-                                     sts_client=Boto3Mock(assume_role_response))
+                                     sts_client=Boto3Mock(assume_role_response),
+                                     pull_image=False)
+
         exit_code = emulator.run({'ProjectName': 'my-codebuild-project'},
                                  input_src, artifacts_dir)
         self.assertEquals(exit_code, 0)

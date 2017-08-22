@@ -23,7 +23,7 @@ class CodebuildBuilder:
         self._version = buildspec['version']
         self._envs = buildspec['env']['variables'] if 'env' in buildspec else []
         self._phases = buildspec['phases']
-        self._artifacts = buildspec['artifacts']
+        self._artifacts = buildspec['artifacts'] if 'artifacts' in buildspec else []
 
     def _run_phase(self, phase_name):
         if not phase_name in self._phases:
@@ -58,6 +58,7 @@ class CodebuildBuilder:
             os.chmod(shell, 500)
             # debug mode
             if self._debug:
+                print('\n' + '=' * 128)
                 print(command)
                 print('Do you want to run this command ? [Enter/S/X] ')
                 skip = self._wait_for_debug()
@@ -94,6 +95,16 @@ class CodebuildBuilder:
                         shutil.copy2(artifact, artifact_dir)
                     else:
                         subprocess.Popen(['cp','--parents',artifact,artifact_dir], cwd=self._src).wait()
+
+        uid = int(os.environ['CBEMU_UID']) if 'CBEMU_UID' in os.environ else None
+        gid = int(os.environ['CBEMU_GID']) if 'CBEMU_GID' in os.environ else None
+
+        if uid and gid:
+            for root, dirs, files in os.walk(self._output_dir):
+                for directory in dirs:
+                    os.chown(join(root, directory), uid, gid)
+                for file in files:
+                    os.chown(join(root, file), uid, gid)
 
     def _process_buildspec_phase(self, phases, phase_name):
         if phase_name in phases:

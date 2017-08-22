@@ -5,29 +5,37 @@ from os.path import join
 import tempfile
 import shutil
 import json
-import time
 import boto3
 import docker
 import click
 import time
 import threading
 from jobpoller import JobPoller
+import sys
 
 cwd = os.getcwd()
 target = join(cwd, 'artifacts')
 default_script_path = join(os.path.dirname(os.path.realpath(__file__)), 'codebuild_builder.py')
 
+
 class CodebuildEmulator:
 
-    def __init__(self, docker_version,
+    def __init__(self,
+                 docker_version,
                  codebuild_client=boto3.client('codebuild'),
                  sts_client=boto3.client('sts'),
-                 assume_role=True, debug=False):
+                 assume_role=True,
+                 debug=False,
+                 override={},
+                 pull_image=True):
+
         self._docker_version = docker_version
         self._codebuild_client = codebuild_client
         self._sts_client = sts_client
         self._assume_role = assume_role
         self._debug = debug
+        self._override = override
+        self._pull_image = pull_image
 
     def _get_project(self, project_name):
         response = self._codebuild_client.batch_get_projects(names=[project_name])
@@ -44,7 +52,9 @@ class CodebuildEmulator:
         run = CodebuildRun(project, input_src, work_dir,
                            self._sts_client, self._docker_version,
                            assume_role=self._assume_role,
-                           debug=self._debug)
+                           debug=self._debug,
+                           override=self._override,
+                           pull_image=self._pull_image)
         run.assume_role()
         run.prepare_dirs()
 
@@ -52,14 +62,23 @@ class CodebuildEmulator:
         exit_code = run.wait_for_container()
 
         run.copy_artifacts(target_dir)
-        shutil.rmtree(work_dir)
+
+        shutil.rmtree(work_dir, ignore_errors=True)
         return exit_code
 
 
 class CodebuildRun:
-    def __init__(self, project, input_src, work_dir,
-                 sts_client=boto3.client('sts'), docker_version='1.24',
-                 assume_role=True, debug=False):
+    def __init__(self,
+                 project,
+                 input_src,
+                 work_dir,
+                 sts_client=boto3.client('sts'),
+                 docker_version='auto',
+                 assume_role=True,
+                 debug=False,
+                 override={},
+                 pull_image=False):
+
         self._project = project
         self._input_src = input_src
         self._work_dir = work_dir
@@ -67,6 +86,8 @@ class CodebuildRun:
         self._docker_version = docker_version
         self._assume_role = assume_role
         self._debug = debug
+        self._override = override
+        self._pull_image = pull_image
 
     def assume_role(self):
         if self._assume_role:
@@ -81,6 +102,7 @@ class CodebuildRun:
             self._access_key_id = creds.access_key
             self._secret_access_key = creds.secret_key
             self._session_token = creds.token
+        self._region_name = boto3.Session().region_name
 
     def prepare_dirs(self):
         readonly = join(self._work_dir, 'codebuild', 'readonly')
@@ -128,23 +150,26 @@ class CodebuildRun:
         entrypoint = '/codebuild/readonly/bin/executor'
         environment = {'AWS_ACCESS_KEY_ID': self._access_key_id,
                        'AWS_SECRET_ACCESS_KEY': self._secret_access_key,
-                       'AWS_SESSION_TOKEN': self._session_token}
+                       'AWS_SESSION_TOKEN': self._session_token,
+                       'AWS_DEFAULT_REGION': self._region_name,
+                       'CBEMU_UID': os.getuid(),
+                       'CBEMU_GID': os.getgid()}
 
         privileged_mode = self._project['environment']['privilegedMode']
-        if privileged_mode:
-            volumes['/var/run/docker.sock'] = {'bind': '/var/run/docker.sock', 'mode': 'rw'}
 
         docker_client = docker.from_env(version=self._docker_version)
-        print('Pulling %s' % image)
-        docker_client.images.pull(name=image)
+
+        if self._pull_image:
+            print('Pulling %s' % image)
+            docker_client.images.pull(name=image)
+
         container = docker_client.containers.run(image=image,
-                                                       volumes=volumes,
-                                                       entrypoint=entrypoint,
-                                                       environment=environment,
-                                                       user=os.getuid(),
-                                                       privileged=privileged_mode,
-                                                       tty=True,
-                                                       detach=True)
+                                                 volumes=volumes,
+                                                 entrypoint=entrypoint,
+                                                 environment=environment,
+                                                 privileged=privileged_mode,
+                                                 tty=True,
+                                                 detach=True)
         self._container = container
 
     def wait_for_container(self):
@@ -153,14 +178,21 @@ class CodebuildRun:
             run_thread.daemon = True
             run_thread.start()
 
-        stream = self._container.logs(stream=True)
-        str = ''
-        for c in stream:
-            if c == '\n':
-                print(str)
-                str = ''
-            else:
-                str = str + c
+        while True:
+            stream = self._container.logs(stdout=True, stderr=True, stream=True, follow=True)
+            try:
+                for c in stream:
+                    sys.stdout.write(c)
+                    sys.stdout.flush()
+                    if c == '\n':
+                        sys.stdout.write('[Container] ')
+                        sys.stdout.flush()
+                break
+            except Exception as e:
+                print('\n' + '=' * 128)
+                print(str(e))
+                print('\n' + '=' * 128)
+
 
         if self._debug:
             run_thread.join(timeout=10)
@@ -193,8 +225,9 @@ class CodebuildRun:
             key = tuple['name']
             value = tuple['value']
             environment[key] = value
-        #TODO add all CODEBUILD envs
-        environment['CODEBUILD_BUILD_ID'] = 'XXXX'
+        for env,val in self._override.iteritems():
+            print('Overriding %s with %s' % (env,val))
+            environment[env] = val
         return environment
 
     def _wait_for_input(self):
@@ -219,7 +252,7 @@ def main():
 
 @click.command()
 @click.option('--provider', required=True)
-@click.option('--docker-version', default='1.24')
+@click.option('--docker-version', default='auto')
 @click.option('--no-assume', is_flag=True)
 @click.option('--debug', is_flag=True)
 def server(provider, docker_version, no_assume, debug):
@@ -231,11 +264,17 @@ def server(provider, docker_version, no_assume, debug):
 @click.option('--project', required=True)
 @click.option('--input-dir', default=cwd)
 @click.option('--target-dir', default=target)
-@click.option('--docker-version', default='1.24')
+@click.option('--docker-version', default='auto')
 @click.option('--no-assume', is_flag=True)
 @click.option('--debug', is_flag=True)
-def developer(project, input_dir, target_dir, docker_version, no_assume, debug):
-    emulator = CodebuildEmulator(docker_version=docker_version, assume_role=not no_assume, debug=debug)
+@click.option('--override')
+def developer(project, input_dir, target_dir, docker_version, no_assume, debug, override):
+    override_envs = {}
+    if override:
+        for envs in override.split(','):
+            env,value = envs.split('=')
+            override_envs[env] = value
+    emulator = CodebuildEmulator(docker_version=docker_version, assume_role=not no_assume, debug=debug, override=override_envs)
     emulator.run({'ProjectName': project}, input_src=input_dir, target_dir=target_dir)
 
 

@@ -77,7 +77,7 @@ class CodebuildBuilder:
 
     def _upload_artifacts(self):
         base_directory = self._artifacts['base-directory'] + '/' if 'base-directory' in self._artifacts else ''
-        discard_paths = self._artifacts['discard-paths']
+        discard_paths = self._artifacts['discard-paths'] if 'discard-paths' in self._artifacts else False
 
         artifact_dir = join(self._output_dir, 'artifacts')
 
@@ -141,7 +141,7 @@ class CodebuildBuilder:
             self._prepare_output()
             self._parse_buildspec()
 
-            if self._run_phases():
+            if self._run_phases() and self._artifacts:
                 self._upload_artifacts()
 
             if not self._succeeded:

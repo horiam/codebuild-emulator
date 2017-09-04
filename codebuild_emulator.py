@@ -27,7 +27,7 @@ class CodebuildEmulator:
                  assume_role=True,
                  debug=False,
                  override={},
-                 pull_image=True):
+                 pull_image=False):
 
         self._docker_version = docker_version
         self._codebuild_client = codebuild_client
@@ -147,7 +147,7 @@ class CodebuildRun:
         image = self._project['environment']['image']
         volumes = {self._readonly_dir: {'bind': '/codebuild/readonly', 'mode': 'ro'},
                    self._output_dir: {'bind': '/codebuild/output', 'mode': 'rw'}}
-        entrypoint = '/codebuild/readonly/bin/executor'
+        command = '/codebuild/readonly/bin/executor'
         environment = {'AWS_ACCESS_KEY_ID': self._access_key_id,
                        'AWS_SECRET_ACCESS_KEY': self._secret_access_key,
                        'AWS_SESSION_TOKEN': self._session_token,
@@ -155,7 +155,8 @@ class CodebuildRun:
                        'CBEMU_UID': os.getuid(),
                        'CBEMU_GID': os.getgid()}
 
-        privileged_mode = self._project['environment']['privilegedMode']
+        privileged_mode = self._project['environment']['privilegedMode'] or image.startswith('aws/codebuild/docker')
+        print('privileged_mode %r\n' % privileged_mode)
 
         docker_client = docker.from_env(version=self._docker_version)
 
@@ -165,7 +166,7 @@ class CodebuildRun:
 
         container = docker_client.containers.run(image=image,
                                                  volumes=volumes,
-                                                 entrypoint=entrypoint,
+                                                 command=command,
                                                  environment=environment,
                                                  privileged=privileged_mode,
                                                  tty=True,
@@ -207,9 +208,11 @@ class CodebuildRun:
         return exit_code
 
     def copy_artifacts(self, artifacts_target_dir):
-        print("Artifacts are copied into " + artifacts_target_dir)
-        shutil.rmtree(artifacts_target_dir, ignore_errors=True)
-        shutil.copytree(join(self._output_dir, 'artifacts'), artifacts_target_dir)
+        artifacts_source_dir = join(self._output_dir, 'artifacts')
+        if os.path.exists(artifacts_source_dir):
+            print("Artifacts are copied into " + artifacts_target_dir)
+            shutil.rmtree(artifacts_target_dir, ignore_errors=True)
+            shutil.copytree(artifacts_source_dir, artifacts_target_dir)
 
     def _get_buildspec(self):
         if 'buildspec' in self._project['source']:
@@ -267,14 +270,15 @@ def server(provider, docker_version, no_assume, debug):
 @click.option('--docker-version', default='auto')
 @click.option('--no-assume', is_flag=True)
 @click.option('--debug', is_flag=True)
+@click.option('--pull', is_flag=True)
 @click.option('--override')
-def developer(project, input_dir, target_dir, docker_version, no_assume, debug, override):
+def developer(project, input_dir, target_dir, docker_version, no_assume, debug, override, pull):
     override_envs = {}
     if override:
         for envs in override.split(','):
             env,value = envs.split('=')
             override_envs[env] = value
-    emulator = CodebuildEmulator(docker_version=docker_version, assume_role=not no_assume, debug=debug, override=override_envs)
+    emulator = CodebuildEmulator(docker_version=docker_version, assume_role=not no_assume, debug=debug, override=override_envs, pull_image=pull)
     emulator.run({'ProjectName': project}, input_src=input_dir, target_dir=target_dir)
 
 

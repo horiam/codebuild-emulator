@@ -33,7 +33,7 @@ codebuild-emulator can pause before runnig each individual command from the buil
 It allows you to avoid running commands line that you don't want or give you the opportunity to go into the container before or after a command for debug purposes.
 
 ```--pull```  
-Force pull of the docker container specified in the CB project.
+Force pull of the docker image specified in the CB project.
 
 ```--no-assume```  
 Skip the assume of the service role specified in the CB project. It will pass the actual user credentials to the container through environment variables. Useful if you can not assume the CB service role with your user. 
@@ -68,7 +68,7 @@ So the CloudFormation step for this example CodePipeline action is going to look
     RunOrder: 1
 ```
 
-Requirements:
+### Requirements:
 - Docker 
 - Python and all codebuild-emulator dependencies installed
 - A machine with aws credentials configured or an EC2 instance with an InstanceProfile
@@ -79,5 +79,5 @@ Requirements:
   * ECR (only if your custom CB docker images are in ECR)
 - A CodeBuild project
 
-Future:
+### Future:
 - A Vgrantfile to run codebuild-emulator

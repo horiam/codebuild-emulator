@@ -19,7 +19,7 @@ After running the codebuild-emulator will write what you specified in the CB pro
 
 Under the hood codebuild-emulator is:
 1. Fetching the CB project from AWS
-2. Assuming the service role of the CB project
+2. Assuming the service IAM role of the CB project
 3. Pulling the CB docker image 
 4. Starting the docker container from this image 
 5. Runing a process in this container that will run all buildspec phases
@@ -36,7 +36,7 @@ It allows you to avoid running commands line that you don't want or give you the
 Force pull of the docker image specified in the CB project.
 
 ```--no-assume```  
-Skip the assume of the service role specified in the CB project. It will pass the actual user credentials to the container through environment variables. Useful if you can not assume the CB service role with your user. 
+Skip the assume of the CB project service IAM role specified in the CB project. It will pass the actual user credentials to the container through environment variables. Useful if you can not assume the CB service role with your user. 
 
 ```--override```  
 Override or pass an extra environment variable to the container. eg ``--override MY_ENV=foo,MY_OTHER_ENV=bar``

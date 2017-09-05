@@ -10,12 +10,13 @@ codebuild-emulator can run in two modes:
 
 ## Developer mode
 Will run the CB project locally and by passing it local input artifact as the content of directory. The output artifact will be put in a directory as well. 
-Usecase: Let's say that you want to run locally one of your CB projects (my-codebuild-project) that builds a jar form a java source code. You will run codebuild-emulator with the local java source code:  
+
+_Usecase:_ Let's say that you want to run locally, one of your CB projects (my-codebuild-project) that builds a jar form a java source code. You will run codebuild-emulator with the local java source code:  
 ```sh
 cd my-java-sourcecode/
 codebuild_emulator.py developer --project my-codebuild-project
 ```  
-After running the codebuild-emulator will write what you specified in the CB project as an output artifcat (the JAR) in the local artifact/ directory.
+After running the codebuild-emulator will write what is specified in the CB project as an output artifcat (the JAR) in the local artifact/ directory.
 
 Under the hood codebuild-emulator is:
 1. Fetching the CB project from AWS

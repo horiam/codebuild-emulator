@@ -1,0 +1,26 @@
+version: 0.2
+env:
+  variables:
+    install: "install"
+    build: "build"
+phases:
+  install:
+    commands:
+      - ls
+      - echo $install > install
+  pre_build:
+    commands:
+      - ls
+      - echo $pre_build > pre_build
+  build:
+    commands:
+      - ls
+      - 'false'
+  post_build:
+    commands:
+      - ls
+      - echo $post_build > post_build
+artifacts:
+  files:
+    - '**/*'
+  discard-paths: no

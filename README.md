@@ -68,7 +68,8 @@ So the CloudFormation step for this example CodePipeline action is going to look
     - Name: OutputArtifact
     RunOrder: 1
 ```
-
+### Install
+```pip install git+https://github.com/horiam/codebuild-emulator.git```
 ### Requirements:
 - Docker 
 - Python and all codebuild-emulator dependencies installed

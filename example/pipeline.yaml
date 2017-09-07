@@ -1,0 +1,238 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  GitHubRepoName:
+    Type: String
+    Default: 'gs-spring-boot'
+    Description: 'Source repo name'
+  GitHubOwner:
+    Type: String
+    Default: 'spring-guides'
+    Description: 'Source owner'
+  GitHubOAuthToken:
+    Type: String
+    Description: 'OAuthToken'
+  ImageTag:
+    Type: String
+    Description: 'Built docker image tag'
+  MyIamRole:
+    Type: String
+    Description: 'Your IAM role ARN to be able to assume the CodeBuild roles'
+
+Resources:
+  CodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - codepipeline.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: /
+      Policies:
+      - PolicyName: CodePipelineService
+        PolicyDocument:
+          Statement:
+          - Action:
+            - s3:GetObject
+            - s3:GetObjectVersion
+            - s3:GetBucketVersioning
+            - s3:PutObject
+            Resource:
+            - !Sub 'arn:aws:s3:::${ArtifactBucket}'
+            - !Sub 'arn:aws:s3:::${ArtifactBucket}/*'
+            Effect: Allow
+          - Action:
+            - codebuild:*
+            - iam:PassRole
+            Resource: '*'
+            Effect: Allow
+          Version: '2012-10-17'
+
+  AppCodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - codebuild.amazonaws.com
+            AWS:
+            - !Ref MyIamRole
+          Action:
+          - sts:AssumeRole
+      Path: /
+      Policies:
+      - PolicyName: CodeBuildPolicy
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+            - s3:GetObject
+            - s3:GetObjectVersion
+            - s3:GetBucketVersioning
+            - s3:PutObject
+            Resource:
+            - !Sub 'arn:aws:s3:::${ArtifactBucket}'
+            - !Sub 'arn:aws:s3:::${ArtifactBucket}/*'
+          - Effect: Allow
+            Action:
+            - logs:*
+            Resource: '*'
+          Version: '2012-10-17'
+
+  ContainerCodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - codebuild.amazonaws.com
+            AWS:
+            - !Ref MyIamRole
+          Action:
+          - sts:AssumeRole
+      Path: /
+      Policies:
+      - PolicyName: CodeBuildPolicy
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+            - s3:GetObject
+            - s3:GetObjectVersion
+            - s3:GetBucketVersioning
+            - s3:PutObject
+            Resource:
+            - !Sub 'arn:aws:s3:::${ArtifactBucket}'
+            - !Sub 'arn:aws:s3:::${ArtifactBucket}/*'
+          - Effect: Allow
+            Action:
+            - logs:*
+            Resource: '*'
+          - Effect: Allow
+            Action:
+            - ecr:*
+            Resource: '*'
+          Version: '2012-10-17'
+
+  AppBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${AWS::StackName}-app-build
+      Artifacts:
+        Type: CODEPIPELINE
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            build:
+              commands:
+                - cd complete/
+                - mvn clean install
+          artifacts:
+            files:
+              - complete/target/gs-spring-boot-0.1.0.jar
+            discard-paths: yes
+      Environment:
+        ComputeType: "BUILD_GENERAL1_SMALL"
+        Type: "LINUX_CONTAINER"
+        Image: 'aws/codebuild/java:openjdk-8'
+      ServiceRole: !GetAtt AppCodeBuildRole.Arn
+
+  ContainerBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${AWS::StackName}-container-build
+      Artifacts:
+        Type: CODEPIPELINE
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            pre_build:
+              commands:
+                - $(aws ecr get-login)
+            build:
+              commands:
+                - echo 'FROM java:latest' > Dockerfile
+                - echo 'ADD gs-spring-boot-0.1.0.jar my-app.jar' >> Dockerfile
+                - echo 'ENTRYPOINT ["/usr/bin/env", "java", "-jar", "my-app.jar"]' >> Dockerfile
+                - docker build -t "${IMAGE_TAG}" .
+                - docker push "${IMAGE_TAG}"
+      Environment:
+        ComputeType: "BUILD_GENERAL1_SMALL"
+        Type: "LINUX_CONTAINER"
+        Image: 'aws/codebuild/docker:1.12.1'
+        EnvironmentVariables:
+        - Name: IMAGE_TAG
+          Value: !Ref ImageTag
+      ServiceRole: !GetAtt ContainerCodeBuildRole.Arn
+
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${AWS::StackName}-${AWS::Region}-${AWS::AccountId}'
+
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      RoleArn: !GetAtt CodePipelineRole.Arn
+      Name: !Ref AWS::StackName
+      Stages:
+
+      - Name: Source
+        Actions:
+        - Name: Source
+          ActionTypeId:
+            Category: Source
+            Owner: ThirdParty
+            Version: '1'
+            Provider: GitHub
+          OutputArtifacts:
+          - Name: SourceRepoCode
+          Configuration:
+            Branch: 'master'
+            Repo: !Ref GitHubRepoName
+            Owner: !Ref GitHubOwner
+            OAuthToken: !Ref GitHubOAuthToken
+          RunOrder: 1
+
+      - Name: Build
+        Actions:
+        - Name: App_Build
+          InputArtifacts:
+          - Name: SourceRepoCode
+          ActionTypeId:
+            Category: Build
+            Owner: AWS
+            Provider: CodeBuild
+            Version: '1'
+          OutputArtifacts:
+          - Name: Jar
+          Configuration:
+            ProjectName: !Ref AppBuildProject
+          RunOrder: 1
+        - Name: Container_Build
+          InputArtifacts:
+          - Name: Jar
+          ActionTypeId:
+            Category: Build
+            Owner: AWS
+            Provider: CodeBuild
+            Version: '1'
+          Configuration:
+            ProjectName: !Ref ContainerBuildProject
+          RunOrder: 2
+
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactBucket

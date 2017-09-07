@@ -21,9 +21,9 @@ class CodebuildBuilder:
     def _parse_buildspec(self):
         buildspec = self._get_buiildspec()
         self._version = buildspec['version']
-        self._envs = buildspec['env']['variables'] if 'env' in buildspec else []
+        self._envs = buildspec.get('env', {}).get('variables', [])
         self._phases = buildspec['phases']
-        self._artifacts = buildspec['artifacts'] if 'artifacts' in buildspec else []
+        self._artifacts = buildspec.get('artifacts', [])
 
     def _run_phase(self, phase_name):
         if not phase_name in self._phases:
@@ -77,7 +77,7 @@ class CodebuildBuilder:
 
     def _upload_artifacts(self):
         base_directory = self._artifacts['base-directory'] + '/' if 'base-directory' in self._artifacts else ''
-        discard_paths = self._artifacts['discard-paths'] if 'discard-paths' in self._artifacts else False
+        discard_paths = self._artifacts.get('discard-paths', False)
 
         artifact_dir = join(self._output_dir, 'artifacts')
 
@@ -94,7 +94,7 @@ class CodebuildBuilder:
                     if discard_paths:
                         shutil.copy2(artifact, artifact_dir)
                     else:
-                        subprocess.Popen(['cp','--parents',artifact,artifact_dir], cwd=self._src).wait()
+                        subprocess.Popen(['cp', '--parents',artifact,artifact_dir], cwd=self._src).wait()
 
         uid = int(os.environ['CBEMU_UID']) if 'CBEMU_UID' in os.environ else None
         gid = int(os.environ['CBEMU_GID']) if 'CBEMU_GID' in os.environ else None

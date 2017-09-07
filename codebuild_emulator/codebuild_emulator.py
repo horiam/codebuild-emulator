@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 
 import os
 from os.path import join
@@ -7,10 +6,8 @@ import shutil
 import json
 import boto3
 import docker
-import click
 import time
 import threading
-from jobpoller import JobPoller
 import sys
 
 cwd = os.getcwd()
@@ -112,7 +109,10 @@ class CodebuildRun:
         bin = join(readonly, 'bin')
         os.mkdir(bin)
 
-        shutil.copy2(default_script_path, join(bin, 'executor'))
+        executor_path = join(bin, 'executor')
+        shutil.copy2(default_script_path, executor_path)
+        os.chmod(executor_path, 500)
+
         src = join(readonly, 'src')
 
         shutil.copytree(self._input_src, src)
@@ -243,43 +243,3 @@ class CodebuildRun:
                 open(join(self._output_dir, 'skip'), 'a').close()
             os.unlink(self._debug_file)
 
-
-@click.group()
-def main():
-    pass
-
-@click.command()
-@click.option('--provider', required=True)
-@click.option('--docker-version', default='auto')
-@click.option('--no-assume', is_flag=True)
-@click.option('--debug', is_flag=True)
-def server(provider, docker_version, no_assume, debug):
-    emulator = CodebuildEmulator(docker_version=docker_version, assume_role=not no_assume, debug=debug)
-    poller = JobPoller({'category': 'Build', 'owner': 'Custom', 'provider': provider, 'version': '1'}, emulator)
-    poller.poll()
-
-@click.command()
-@click.option('--project', required=True)
-@click.option('--input-dir', default=cwd)
-@click.option('--target-dir', default=target)
-@click.option('--docker-version', default='auto')
-@click.option('--no-assume', is_flag=True)
-@click.option('--debug', is_flag=True)
-@click.option('--pull', is_flag=True)
-@click.option('--override')
-def developer(project, input_dir, target_dir, docker_version, no_assume, debug, override, pull):
-    override_envs = {}
-    if override:
-        for envs in override.split(','):
-            env,value = envs.split('=')
-            override_envs[env] = value
-    emulator = CodebuildEmulator(docker_version=docker_version, assume_role=not no_assume, debug=debug, override=override_envs, pull_image=pull)
-    emulator.run({'ProjectName': project}, input_src=input_dir, target_dir=target_dir)
-
-
-main.add_command(server)
-main.add_command(developer)
-
-
-if __name__ == '__main__':
-    main()

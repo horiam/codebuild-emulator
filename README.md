@@ -14,7 +14,7 @@ Will run the CB project locally and by passing it local input artifact as the co
 _Usecase:_ Let's say that you want to run locally, one of your CB projects (my-codebuild-project) that builds a jar form a java source code. You will run codebuild-emulator with the local java source code:  
 ```sh
 cd my-java-sourcecode/
-codebuild_emulator.py developer --project my-codebuild-project
+cbemu developer --project my-codebuild-project
 ```  
 After running the codebuild-emulator will write what is specified in the CB project as an output artifcat (the JAR) in the local artifact/ directory.
 
@@ -47,7 +47,7 @@ For codebuild-emulator and underlying docker to be able to run docker in docker 
 
 ## Server mode
 The server mode is there to work in coordination with a custom action in CodePipeline. It will poll for CodePipeline builds and run them locally.
-For example:  ```codebuild_emulator.py server --provider my-provider```
+For example:  ```cbemu server --provider my-provider```
 is going to poll for CodePipeline job id ``{'category': 'Build', 'owner': 'Custom', 'provider': 'my-provider', 'version': '1'}`` it expects a CodePipeline actionConfiguration with a CodeBuild project name. 
 
 So the CloudFormation step for this example CodePipeline action is going to look like this:

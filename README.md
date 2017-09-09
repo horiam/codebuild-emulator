@@ -11,19 +11,51 @@ codebuild-emulator can run in two modes:
 ## Developer mode
 Will run the CB project locally and by passing it local input artifact as the content of directory. The output artifact will be put in a directory as well. 
 
-_Usecase:_ Let's say that you want to run locally, one of your CB projects (my-codebuild-project) that builds a jar form a java source code. You will run codebuild-emulator with the local java source code:  
-```sh
-cd my-java-sourcecode/
-cbemu developer --project my-codebuild-project
-```  
-After running the codebuild-emulator will write what is specified in the CB project as an output artifcat (the JAR) in the local artifact/ directory.
-
 Under the hood codebuild-emulator is:
 1. Fetching the CB project from AWS
 2. Assuming the service IAM role of the CB project
 3. Pulling the CB docker image 
 4. Starting the docker container from this image 
 5. Runing a process in this container that will run all buildspec phases
+
+### Example Usecase: 
+*You can find all the files mentioned here in the example directory of this project.*
+
+Let's say that you need a to build your java artefact and put in a docker container ready to be used. You can use AWS CodePipeline and CodeBuuild to that for you.  
+The [CloudFormation template](example/pipeline.yaml) contains the definition of a CodePipeline with two CodeBuild stages that is going to build the [Spring Boot app example](https://spring.io/guides/gs/spring-boot/) then put in a docker image.   
+
+To create the pipeline you need:
+ * [GitHub OAthToken](https://help.github.com/articles/git-automation-with-oauth-tokens/)  
+ * A docker registry where CodeBuild can push the docker image (AWS ECR for example)
+ * The ARN of your IAM user or role - so that later you can assume the CodeBuild service IAM role
+```bash
+cd example/
+aws cloudformation create-stack --stack-name example-pipeline \
+--template-body file://pipeline.yaml \
+--capabilities CAPABILITY_IAM \
+--parameters \
+ParameterKey=GitHubOAuthToken,ParameterValue=<Your GitHub OAthToken> \
+ParameterKey=ImageTag,ParameterValue=<Name of you docker image> \
+ParameterKey=MyIamRole,ParameterValue=<arn of your IAM user/role>
+```
+
+Run the prepare script that will clone the Spring Boot project and build the two docker images that the CB projects from the pipeline use (this can take some time).
+```bash
+./prepare.sh
+```
+Run the first CB project with codebuild-emulator - this will run the buildspec of the CB project to build the jar and put in the artifact directory:
+```bash
+cd gs-spring-boot/
+cbemu developer --project example-pipeline-app-build
+```
+
+Now let's build the docker image and push it to the registry by running codebuild-emulator with the second CB project:
+```bash
+cd artifact/
+cbemu developer --project example-pipeline-container-build 
+```  
+If you don't want to push the docker image use the ``--debug`` mode and skip the push step. Or you can change the docker image name by overriding the CB project's environment varible with ``--override IMAGE_TAG=my-other-test-registry.com/my-image`` for example.  
+
 
 ### Command line arguments
 ```--project <project-name>```  

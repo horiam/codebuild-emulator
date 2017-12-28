@@ -113,5 +113,3 @@ So the CloudFormation step for this example CodePipeline action is going to look
   * ECR (only if your custom CB docker images are in ECR)
 - A CodeBuild project
 
-### Future:
-- A Vgrantfile to run codebuild-emulator

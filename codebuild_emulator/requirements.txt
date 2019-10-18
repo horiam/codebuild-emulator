@@ -13,7 +13,7 @@ ipaddress==1.0.18
 jmespath==0.9.3
 pprint==0.1
 python-dateutil==2.6.0
-PyYAML==3.12
+PyYAML==5.1
 requests==2.18.1
 s3transfer==0.1.10
 six==1.10.0
